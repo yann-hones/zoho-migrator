@@ -9,6 +9,11 @@ const apiClient = axios.create({
 
 // Zoho API
 export const zohoApi = {
+  listTeamFolders: async () => {
+    const response = await apiClient.get(`/zoho/teamfolders`);
+    return response.data.data;
+  },
+
   listFiles: async (folderId: string = 'root') => {
     const response = await apiClient.get(`/zoho/files/${folderId}`);
     return response.data.data;

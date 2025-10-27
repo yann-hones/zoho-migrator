@@ -4,6 +4,20 @@ import { zohoService } from '../services/zoho.service';
 export const zohoRouter = Router();
 
 /**
+ * GET /api/zoho/teamfolders
+ * List all Team Folders (workspaces)
+ */
+zohoRouter.get('/teamfolders', async (req, res) => {
+  try {
+    const teamFolders = await zohoService.getTeamFolders();
+    res.json({ success: true, data: teamFolders });
+  } catch (error: any) {
+    console.error('Error listing Zoho Team Folders:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * GET /api/zoho/files/:folderId?
  * List files in a Zoho Drive folder
  */

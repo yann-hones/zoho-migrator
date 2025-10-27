@@ -1,5 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { zohoApi, sharepointApi, transferApi } from './services/api';
+import { zohoApi, transferApi } from './services/api';
+
+interface ZohoTeamFolder {
+  id: string;
+  name: string;
+  type: string;
+  attributes: {
+    name: string;
+    created_time: string;
+    modified_time: string;
+  };
+}
+
+interface ZohoFolder {
+  id: string;
+  name: string;
+  type: string;
+  attributes?: {
+    name: string;
+    type: string;
+  };
+}
 
 interface ZohoFile {
   id: string;
@@ -16,8 +37,17 @@ interface TransferProgress {
   fileName: string;
 }
 
+interface BreadcrumbItem {
+  id: string;
+  name: string;
+}
+
 function App() {
+  const [zohoTeamFolders, setZohoTeamFolders] = useState<ZohoTeamFolder[]>([]);
+  const [zohoFolders, setZohoFolders] = useState<ZohoFolder[]>([]);
   const [zohoFiles, setZohoFiles] = useState<ZohoFile[]>([]);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [breadcrumb, setBreadcrumb] = useState<BreadcrumbItem[]>([{ id: 'root', name: '🏢 Team Folders' }]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [sharepointFolder, setSharepointFolder] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -27,19 +57,63 @@ function App() {
   const [progress, setProgress] = useState<TransferProgress | null>(null);
 
   useEffect(() => {
-    loadZohoFiles();
+    loadZohoTeamFolders();
   }, []);
 
-  const loadZohoFiles = async () => {
+  const loadZohoTeamFolders = async () => {
     setLoading(true);
     setError(null);
     try {
-      const files = await zohoApi.listFiles();
-      setZohoFiles(files);
+      const teamFolders = await zohoApi.listTeamFolders();
+      setZohoTeamFolders(teamFolders);
+      setZohoFolders([]);
+      setZohoFiles([]);
+      setCurrentFolderId(null);
+      setBreadcrumb([{ id: 'root', name: '🏢 Team Folders' }]);
     } catch (err: any) {
-      setError(`Erreur lors du chargement des fichiers Zoho: ${err.message}`);
+      setError(`Erreur lors du chargement des Team Folders: ${err.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const navigateToFolder = async (folderId: string, folderName: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [folders, files] = await Promise.all([
+        zohoApi.listFolders(folderId),
+        zohoApi.listFiles(folderId),
+      ]);
+
+      setZohoFolders(folders);
+      setZohoFiles(files);
+      setCurrentFolderId(folderId);
+      setZohoTeamFolders([]);
+
+      // Update breadcrumb
+      const existingIndex = breadcrumb.findIndex((item: BreadcrumbItem) => item.id === folderId);
+      if (existingIndex >= 0) {
+        // Going back to an existing folder
+        setBreadcrumb(breadcrumb.slice(0, existingIndex + 1));
+      } else {
+        // Going deeper
+        setBreadcrumb([...breadcrumb, { id: folderId, name: folderName }]);
+      }
+    } catch (err: any) {
+      setError(`Erreur lors du chargement du dossier: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const navigateToBreadcrumb = (index: number) => {
+    if (index === 0) {
+      // Go back to root (Team Folders)
+      loadZohoTeamFolders();
+    } else {
+      const item = breadcrumb[index];
+      navigateToFolder(item.id, item.name);
     }
   };
 
@@ -54,7 +128,7 @@ function App() {
   };
 
   const selectAll = () => {
-    setSelectedFiles(new Set(zohoFiles.map(f => f.id)));
+    setSelectedFiles(new Set(zohoFiles.map((f: ZohoFile) => f.id)));
   };
 
   const deselectAll = () => {
@@ -85,14 +159,14 @@ function App() {
       let currentIndex = 0;
 
       for (const fileId of fileIds) {
-        const file = zohoFiles.find(f => f.id === fileId);
+        const file = zohoFiles.find((f: ZohoFile) => f.id === fileId);
         setProgress({
           total: fileIds.length,
           current: currentIndex + 1,
           fileName: file?.name || 'Fichier inconnu',
         });
 
-        await transferApi.transferFile(fileId, sharepointFolder);
+        await transferApi.transferFile(fileId as string, sharepointFolder);
         currentIndex++;
       }
 
@@ -131,6 +205,30 @@ function App() {
               </div>
             ) : (
               <>
+                {/* Breadcrumb Navigation */}
+                <div style={{ marginBottom: '15px', padding: '10px', background: '#f7fafc', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                  {breadcrumb.map((item: BreadcrumbItem, index: number) => (
+                    <React.Fragment key={item.id}>
+                      <button
+                        onClick={() => navigateToBreadcrumb(index)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: index === breadcrumb.length - 1 ? '#2d3748' : '#4299e1',
+                          cursor: index === breadcrumb.length - 1 ? 'default' : 'pointer',
+                          fontWeight: index === breadcrumb.length - 1 ? 'bold' : 'normal',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                        }}
+                        disabled={index === breadcrumb.length - 1}
+                      >
+                        {item.name}
+                      </button>
+                      {index < breadcrumb.length - 1 && <span style={{ color: '#a0aec0' }}>›</span>}
+                    </React.Fragment>
+                  ))}
+                </div>
+
                 <div style={{ marginBottom: '10px', display: 'flex', gap: '10px' }}>
                   <button className="btn btn-secondary" onClick={selectAll}>
                     Tout sélectionner
@@ -138,15 +236,62 @@ function App() {
                   <button className="btn btn-secondary" onClick={deselectAll}>
                     Tout désélectionner
                   </button>
-                  <button className="btn btn-secondary" onClick={loadZohoFiles}>
+                  <button className="btn btn-secondary" onClick={() => navigateToBreadcrumb(0)}>
                     🔄 Actualiser
                   </button>
                 </div>
 
                 <div className="file-list">
-                  {zohoFiles.length === 0 ? (
+                  {/* Team Folders (at root level) */}
+                  {zohoTeamFolders.length > 0 && (
+                    <>
+                      {zohoTeamFolders.map(teamFolder => (
+                        <div
+                          key={teamFolder.id}
+                          className="file-item"
+                          onClick={() => navigateToFolder(teamFolder.id, teamFolder.attributes.name)}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <div className="file-info">
+                            <span className="file-icon">🏢</span>
+                            <div className="file-details">
+                              <div className="file-name">{teamFolder.attributes.name}</div>
+                              <div className="file-size">Team Folder</div>
+                            </div>
+                          </div>
+                          <span style={{ color: '#a0aec0' }}>›</span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  {/* Folders (inside a team folder or subfolder) */}
+                  {zohoFolders.length > 0 && (
+                    <>
+                      {zohoFolders.map(folder => (
+                        <div
+                          key={folder.id}
+                          className="file-item"
+                          onClick={() => navigateToFolder(folder.id, folder.attributes?.name || folder.name)}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <div className="file-info">
+                            <span className="file-icon">📁</span>
+                            <div className="file-details">
+                              <div className="file-name">{folder.attributes?.name || folder.name}</div>
+                              <div className="file-size">Dossier</div>
+                            </div>
+                          </div>
+                          <span style={{ color: '#a0aec0' }}>›</span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  {/* Files */}
+                  {zohoFiles.length === 0 && zohoTeamFolders.length === 0 && zohoFolders.length === 0 ? (
                     <div style={{ padding: '20px', textAlign: 'center', color: '#718096' }}>
-                      Aucun fichier trouvé
+                      {currentFolderId ? 'Aucun fichier ou dossier trouvé' : 'Sélectionnez un Team Folder pour commencer'}
                     </div>
                   ) : (
                     zohoFiles.map(file => (
@@ -169,7 +314,7 @@ function App() {
                           className="checkbox"
                           checked={selectedFiles.has(file.id)}
                           onChange={() => toggleFileSelection(file.id)}
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         />
                       </div>
                     ))
@@ -191,7 +336,7 @@ function App() {
                 type="text"
                 placeholder="ex: Documents/Migration"
                 value={sharepointFolder}
-                onChange={(e) => setSharepointFolder(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSharepointFolder(e.target.value)}
                 disabled={transferring}
               />
               <small style={{ color: '#718096', marginTop: '5px', display: 'block' }}>
@@ -210,8 +355,8 @@ function App() {
                 <strong>Taille totale:</strong>{' '}
                 {formatFileSize(
                   zohoFiles
-                    .filter(f => selectedFiles.has(f.id))
-                    .reduce((sum, f) => sum + f.size, 0)
+                    .filter((f: ZohoFile) => selectedFiles.has(f.id))
+                    .reduce((sum: number, f: ZohoFile) => sum + f.size, 0)
                 )}
               </p>
             </div>

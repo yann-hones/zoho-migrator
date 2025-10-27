@@ -17,6 +17,17 @@ export interface ZohoFolder {
   created_time: string;
 }
 
+export interface ZohoTeamFolder {
+  id: string;
+  name: string;
+  type: string;
+  attributes: {
+    name: string;
+    created_time: string;
+    modified_time: string;
+  };
+}
+
 export class ZohoService {
   private apiClient: AxiosInstance;
   private accessToken: string | null = null;
@@ -112,6 +123,35 @@ export class ZohoService {
   }
 
   /**
+   * Get all Team Folders (workspaces)
+   */
+  async getTeamFolders(): Promise<ZohoTeamFolder[]> {
+    const token = await this.getAccessToken();
+
+    try {
+      console.log('🏢 Fetching Team Folders (workspaces)...');
+
+      // Try the private folders endpoint which lists all accessible team folders
+      const response = await this.apiClient.get(
+        '/workdrive/api/v1/privatefolders',
+        {
+          headers: {
+            Authorization: `Zoho-oauthtoken ${token}`,
+          },
+        }
+      );
+
+      const teamFolders = response.data.data || [];
+      console.log(`✅ Found ${teamFolders.length} Team Folder(s)`);
+
+      return teamFolders;
+    } catch (error: any) {
+      console.error('❌ Error getting team folders:', error.response?.data || error.message);
+      throw new Error(`Failed to get Zoho team folders: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
    * List files in a folder
    */
   async listFiles(folderId: string = 'root'): Promise<ZohoFile[]> {
@@ -119,13 +159,11 @@ export class ZohoService {
 
     try {
       let endpoint: string;
-      let params: any = {};
 
       if (folderId === 'root') {
-        // For root, list all files accessible to the user
-        // This will return files from My Files and shared files
-        endpoint = '/workdrive/api/v1/files';
-        console.log('📂 Listing all accessible files from Zoho Workdrive...');
+        // For root, return empty array - user should select a team folder first
+        console.log('📂 Root level - please select a Team Folder');
+        return [];
       } else {
         // For specific folder, list files in that folder
         endpoint = `/workdrive/api/v1/files/${folderId}/files`;
@@ -136,7 +174,6 @@ export class ZohoService {
         headers: {
           Authorization: `Zoho-oauthtoken ${token}`,
         },
-        params,
       });
 
       console.log('✅ Successfully retrieved files from Zoho');
@@ -159,39 +196,37 @@ export class ZohoService {
   }
 
   /**
-   * List folders
+   * List folders (including Team Folders at root level)
    */
-  async listFolders(parentId: string = 'root'): Promise<ZohoFolder[]> {
+  async listFolders(parentId: string = 'root'): Promise<ZohoFolder[] | ZohoTeamFolder[]> {
     const token = await this.getAccessToken();
 
     try {
-      let endpoint: string;
-
       if (parentId === 'root') {
-        // For root, list all folders accessible to the user
-        endpoint = '/workdrive/api/v1/files';
-        console.log('📁 Listing all accessible folders from Zoho Workdrive...');
+        // For root, return Team Folders (workspaces)
+        console.log('📁 Listing Team Folders at root level...');
+        return await this.getTeamFolders();
       } else {
         // For specific parent folder, list sub-folders
-        endpoint = `/workdrive/api/v1/files/${parentId}/files`;
+        const endpoint = `/workdrive/api/v1/files/${parentId}/files`;
         console.log(`📁 Listing folders in parent: ${parentId}`);
+
+        const response = await this.apiClient.get(endpoint, {
+          headers: {
+            Authorization: `Zoho-oauthtoken ${token}`,
+          },
+        });
+
+        const items = response.data.data || [];
+        const folders = items.filter((item: any) => {
+          const attrs = item.attributes || item;
+          const type = attrs.type || item.type;
+          return type === 'folder';
+        });
+
+        console.log(`📊 Found ${folders.length} folder(s)`);
+        return folders;
       }
-
-      const response = await this.apiClient.get(endpoint, {
-        headers: {
-          Authorization: `Zoho-oauthtoken ${token}`,
-        },
-      });
-
-      const items = response.data.data || [];
-      const folders = items.filter((item: any) => {
-        const attrs = item.attributes || item;
-        const type = attrs.type || item.type;
-        return type === 'folder';
-      });
-
-      console.log(`📊 Found ${folders.length} folder(s)`);
-      return folders;
     } catch (error: any) {
       console.error('❌ Zoho API Error:', error.response?.data || error.message);
       throw new Error(`Failed to list Zoho folders: ${error.response?.data?.message || error.message}`);
