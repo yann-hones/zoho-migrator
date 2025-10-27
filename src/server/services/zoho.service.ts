@@ -36,9 +36,15 @@ export class ZohoService {
       return this.accessToken;
     }
 
+    const accountsDomain = process.env.ZOHO_ACCOUNTS_DOMAIN || 'https://accounts.zoho.com';
+    const tokenUrl = `${accountsDomain}/oauth/v2/token`;
+
+    console.log('🔑 Attempting to get Zoho access token...');
+    console.log('Token URL:', tokenUrl);
+
     try {
       const response = await axios.post(
-        'https://accounts.zoho.com/oauth/v2/token',
+        tokenUrl,
         null,
         {
           params: {
@@ -51,6 +57,7 @@ export class ZohoService {
       );
 
       this.accessToken = response.data.access_token;
+      console.log('✅ Successfully obtained Zoho access token');
 
       // Clear token after 50 minutes (tokens expire in 1 hour)
       setTimeout(() => {
@@ -62,8 +69,29 @@ export class ZohoService {
       }
 
       return this.accessToken;
-    } catch (error) {
-      throw new Error(`Failed to get Zoho access token: ${error}`);
+    } catch (error: any) {
+      console.error('❌ Failed to get Zoho access token');
+      console.error('Error details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+      });
+
+      if (error.response?.status === 403) {
+        console.error('\n⚠️  Error 403 - Possible causes:');
+        console.error('1. Wrong Zoho region - Try setting ZOHO_ACCOUNTS_DOMAIN in .env:');
+        console.error('   - EU: https://accounts.zoho.eu');
+        console.error('   - US: https://accounts.zoho.com (default)');
+        console.error('   - IN: https://accounts.zoho.in');
+        console.error('   - AU: https://accounts.zoho.com.au');
+        console.error('   - CN: https://accounts.zoho.com.cn');
+        console.error('2. Invalid refresh token');
+        console.error('3. Invalid client_id or client_secret');
+        console.error('4. Token has been revoked\n');
+      }
+
+      throw new Error(`Failed to get Zoho access token: ${error.message} (Status: ${error.response?.status})`);
     }
   }
 
