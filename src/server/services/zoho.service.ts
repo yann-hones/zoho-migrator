@@ -57,10 +57,30 @@ export class ZohoService {
         this.accessToken = null;
       }, 50 * 60 * 1000);
 
+      if (!this.accessToken) {
+        throw new Error('Failed to get Zoho access token: Empty token received');
+      }
+
       return this.accessToken;
     } catch (error) {
       throw new Error(`Failed to get Zoho access token: ${error}`);
     }
+  }
+
+  /**
+   * Normalize Zoho API response to ZohoFile interface
+   */
+  private normalizeFile(item: any): ZohoFile {
+    const attrs = item.attributes || item;
+    return {
+      id: item.id || attrs.id,
+      name: attrs.name || item.name,
+      type: attrs.type || item.type,
+      size: attrs.size || item.size || 0,
+      created_time: attrs.created_time || item.created_time,
+      modified_time: attrs.modified_time || item.modified_time,
+      parent_id: attrs.parent_id || item.parent_id,
+    };
   }
 
   /**
@@ -70,8 +90,69 @@ export class ZohoService {
     const token = await this.getAccessToken();
 
     try {
+      if (folderId === 'root') {
+        // For root, we need to get team folders first, then list files from all of them
+        const teamFolders = await this.getTeamFolders();
+
+        if (teamFolders.length === 0) {
+          return [];
+        }
+
+        // Get files from the first team folder
+        const firstTeamFolder = teamFolders[0];
+        const response = await this.apiClient.get(
+          `/workdrive/api/v1/teamfolders/${firstTeamFolder.id}/files`,
+          {
+            headers: {
+              Authorization: `Zoho-oauthtoken ${token}`,
+            },
+          }
+        );
+
+        const items = response.data.data || [];
+        return items
+          .filter((item: any) => {
+            const type = item.attributes?.type || item.type;
+            return type !== 'folder';
+          })
+          .map((item: any) => this.normalizeFile(item));
+      } else {
+        // For specific folder, use the files endpoint with parent_id
+        const response = await this.apiClient.get(
+          `/workdrive/api/v1/files`,
+          {
+            headers: {
+              Authorization: `Zoho-oauthtoken ${token}`,
+            },
+            params: {
+              parent_id: folderId,
+            },
+          }
+        );
+
+        const items = response.data.data || [];
+        return items
+          .filter((item: any) => {
+            const type = item.attributes?.type || item.type;
+            return type !== 'folder';
+          })
+          .map((item: any) => this.normalizeFile(item));
+      }
+    } catch (error: any) {
+      console.error('Zoho API Error:', error.response?.data || error.message);
+      throw new Error(`Failed to list Zoho files: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
+   * Get team folders (workspaces)
+   */
+  private async getTeamFolders(): Promise<any[]> {
+    const token = await this.getAccessToken();
+
+    try {
       const response = await this.apiClient.get(
-        `/workdrive/api/v1/files/${folderId}/files`,
+        '/workdrive/api/v1/teamfolders',
         {
           headers: {
             Authorization: `Zoho-oauthtoken ${token}`,
@@ -81,7 +162,8 @@ export class ZohoService {
 
       return response.data.data || [];
     } catch (error: any) {
-      throw new Error(`Failed to list Zoho files: ${error.message}`);
+      console.error('Error getting team folders:', error.response?.data || error.message);
+      throw new Error(`Failed to get Zoho team folders: ${error.response?.data?.message || error.message}`);
     }
   }
 
@@ -92,21 +174,29 @@ export class ZohoService {
     const token = await this.getAccessToken();
 
     try {
-      const response = await this.apiClient.get(
-        `/workdrive/api/v1/files/${parentId}/files`,
-        {
-          headers: {
-            Authorization: `Zoho-oauthtoken ${token}`,
-          },
-          params: {
-            'filter[type]': 'folder',
-          },
-        }
-      );
+      if (parentId === 'root') {
+        // For root, return team folders as the top-level folders
+        return await this.getTeamFolders();
+      } else {
+        // For specific folder, use the files endpoint with parent_id
+        const response = await this.apiClient.get(
+          `/workdrive/api/v1/files`,
+          {
+            headers: {
+              Authorization: `Zoho-oauthtoken ${token}`,
+            },
+            params: {
+              parent_id: parentId,
+            },
+          }
+        );
 
-      return response.data.data || [];
+        const files = response.data.data || [];
+        return files.filter((item: any) => item.attributes?.type === 'folder');
+      }
     } catch (error: any) {
-      throw new Error(`Failed to list Zoho folders: ${error.message}`);
+      console.error('Zoho API Error:', error.response?.data || error.message);
+      throw new Error(`Failed to list Zoho folders: ${error.response?.data?.message || error.message}`);
     }
   }
 
