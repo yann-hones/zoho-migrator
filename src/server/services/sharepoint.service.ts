@@ -53,6 +53,10 @@ export class SharePointService {
         this.accessToken = null;
       }, 50 * 60 * 1000);
 
+      if (!this.accessToken) {
+        throw new Error('Failed to get SharePoint access token: Empty token received');
+      }
+
       return this.accessToken;
     } catch (error: any) {
       throw new Error(`Failed to get SharePoint access token: ${error.message}`);
@@ -86,6 +90,11 @@ export class SharePointService {
       );
 
       this.siteId = response.data.id;
+
+      if (!this.siteId) {
+        throw new Error('Failed to get SharePoint site ID: Empty site ID received');
+      }
+
       return this.siteId;
     } catch (error: any) {
       throw new Error(`Failed to get SharePoint site ID: ${error.message}`);

@@ -9,7 +9,7 @@ export const sharepointRouter = Router();
  */
 sharepointRouter.get('/files/*', async (req, res) => {
   try {
-    const folderPath = req.params[0] || '';
+    const folderPath = (req.params as any)[0] || '';
     const files = await sharepointService.listFiles(folderPath);
     res.json({ success: true, data: files });
   } catch (error: any) {
